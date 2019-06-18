@@ -1,4 +1,3 @@
-# from fastestimator.pipeline.static.preprocess import Reshape
 from fastestimator.estimator.estimator import Estimator
 from fastestimator.pipeline.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
