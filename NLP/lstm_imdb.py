@@ -1,14 +1,19 @@
+from fastestimator.pipeline.static.preprocess import Reshape
 from fastestimator.estimator.estimator import Estimator
 from fastestimator.pipeline.pipeline import Pipeline
 from fastestimator.estimator.trace import Accuracy
+from tensorflow.keras import layers
 import tensorflow as tf
 import numpy as np
 
+MAX_WORDS = 1000
+MAX_LEN = 150
+
 class Network:
     def __init__(self):
-        self.model = LeNet()
+        self.model = self.create_lstm()
         self.optimizer = tf.optimizers.Adam()
-        self.loss = tf.losses.SparseCategoricalCrossentropy()
+        self.loss = tf.losses.BinaryCrossentropy()
 
     def train_op(self, batch):
         with tf.GradientTape() as tape:
@@ -23,21 +28,30 @@ class Network:
         loss = self.loss(batch["y"], predictions)
         return predictions, loss
 
+    def create_lstm(self):
+        model = tf.keras.Sequential()
+        model.add(layers.Embedding(MAX_WORDS, 100, input_length=MAX_LEN))
+        model.add(layers.Dropout(0.2))
+        model.add(layers.Conv1D(64, 5, activation='relu'))
+        model.add(layers.MaxPooling1D(pool_size=4))
+        model.add(layers.LSTM(100))
+        model.add(layers.Dense(1, activation="sigmoid"))
+        return model
+
 def pad(list, padding_size, padding_value):
     return list + [padding_value] * abs((len(list)-padding_size))
 
-def get_estimator(epochs=2, batch_size=64, optimizer="adam"):
+def get_estimator(epochs=10, batch_size=64, optimizer="adam"):
 
-    (x_train, y_train), (x_eval, y_eval) = tf.keras.datasets.imdb.load_data(maxlen=300)
+    (x_train, y_train), (x_eval, y_eval) = tf.keras.datasets.imdb.load_data(maxlen=300, num_words=MAX_WORDS)
     x_train = np.array([pad(x, 300, 0) for x in x_train])
     x_eval = np.array([pad(x, 300, 0) for x in x_eval])
-
 
     pipeline = Pipeline(batch_size=batch_size,
                         feature_name=["x", "y"],
                         train_data={"x": x_train, "y": y_train},
                         validation_data={"x": x_eval, "y": y_eval},
-                        transform_train= [[], []])
+                        transform_train= [[], [Reshape([1])]])
 
     traces = [Accuracy(feature_true="y")]
 
