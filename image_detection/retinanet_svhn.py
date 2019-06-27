@@ -25,9 +25,33 @@ class Network:
         return predictions, loss
 
     def eval_op(self, batch):
+        top_n = 1000
+        score_threshold = 0.05
         predictions = self.model(batch["image"], training=False)
         loss = self.loss((batch["target_cls"], batch["target_loc"]), predictions)
-        return predictions, loss
+        cls_pred, loc_pred = tuple(predictions)
+        num_batch, num_anchor, _ = loc_pred.shape
+        cls_best_score = tf.reduce_max(cls_pred, axis=-1)
+        cls_best_class = tf.argmax(cls_pred, axis=-1)
+        #select top n anchor boxes to proceed 
+        sorted_score = tf.sort(cls_best_score,  direction='DESCENDING')
+        top_n = tf.minimum(top_n, num_anchor)
+        cls_best_score = tf.cond(tf.greater(num_anchor, top_n),
+                                lambda: tf.where(tf.greater_equal(cls_best_score, tf.tile(sorted_score[:,top_n-1:top_n],[1, num_anchor])), cls_best_score, 0.0),
+                                lambda: cls_best_score)
+        #Padded Nonmax suppression with threshold
+        selected_indices_padded = tf.map_fn(lambda x: tf.image.non_max_suppression_padded(x[0], x[1], top_n, pad_to_max_output_size=True, score_threshold=score_threshold).selected_indices, (loc_pred, cls_best_score), dtype=tf.int32, back_prop=False)
+        valid_outputs = tf.map_fn(lambda x: tf.image.non_max_suppression_padded(x[0], x[1], top_n, pad_to_max_output_size=True, score_threshold=score_threshold).valid_outputs, (loc_pred, cls_best_score), dtype=tf.int32, back_prop=False)
+        #select output anchors after the NMS
+        batch_index = tf.tile(tf.reshape(tf.range(num_batch),[-1, 1]), [1, top_n])
+        selected_indices_padded = tf.stack([batch_index, selected_indices_padded], axis=-1)
+        select_mask = tf.sequence_mask(valid_outputs, top_n)
+        selected_anchors = tf.boolean_mask(selected_indices_padded, select_mask)
+        #get the class and coordinates or output anchor
+        loc_selected = tf.gather_nd(loc_pred, selected_anchors)
+        cls_selected = tf.gather_nd(cls_best_class, selected_anchors)
+        output = (cls_selected, loc_selected, valid_outputs)
+        return output, loss
 
 class MyPipeline(Pipeline):
     def edit_feature(self, feature):
@@ -89,13 +113,13 @@ class MyLoss(tf.losses.Loss):
         return smooth_l1_loss
 
 def get_estimator():
-    train_csv, test_csv, path = svhn_data.load_data()
+    # train_csv, test_csv, path = svhn_data.load_data()
 
     pipeline = MyPipeline(batch_size=256,
                           feature_name=["image", "label", "x1", "y1", "x2", "y2", "target_cls", "target_loc"],
-                          train_data=train_csv,
-                          validation_data=test_csv,
-                          transform_dataset=[[ImageReader(parent_path=path)], [String2List()], [String2List()], [String2List()], [String2List()], [String2List()], [],[]],
+                        #   train_data=train_csv,
+                        #   validation_data=test_csv,
+                        #   transform_dataset=[[ImageReader(parent_path=path)], [String2List()], [String2List()], [String2List()], [String2List()], [String2List()], [],[]],
                           transform_train= [[Minmax()], [], [], [],[],[],[],[]],
                           padded_batch=True)
     
