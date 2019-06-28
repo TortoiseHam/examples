@@ -4,7 +4,7 @@ from fastestimator.pipeline.dynamic.preprocess import ImageReader
 from fastestimator.pipeline.static.preprocess import Minmax
 from fastestimator.estimator.estimator import Estimator
 from fastestimator.pipeline.pipeline import Pipeline
-from fastestimator.estimator.trace import Accuracy
+from fastestimator.estimator.trace import Accuracy, Trace
 import tensorflow as tf
 import numpy as np
 import svhn_data
@@ -15,6 +15,8 @@ class Network:
         self.model = RetinaNet(input_shape=(64, 64, 3), num_classes=10)
         self.optimizer = tf.optimizers.Adam()
         self.loss = MyLoss()
+        self.anchorbox = tf.convert_to_tensor(get_fpn_anchor_box(input_shape=(64, 64, 3)))
+        self.anchor_w_h = tf.tile(self.anchorbox[:,2:], [1, 2]) - tf.tile(self.anchorbox[:, :2], [1, 2])
 
     def train_op(self, batch):
         with tf.GradientTape() as tape:
@@ -30,6 +32,8 @@ class Network:
         predictions = self.model(batch["image"], training=False)
         loss = self.loss((batch["target_cls"], batch["target_loc"]), predictions)
         cls_pred, loc_pred = tuple(predictions)
+        #convert the residual prediction to absolute prediction in (x1, y1, x2, y2)
+        loc_pred = tf.map_fn(lambda x: x * self.anchor_w_h + self.anchorbox, elems=loc_pred, dtype=tf.float32, back_prop=False)
         num_batch, num_anchor, _ = loc_pred.shape
         cls_best_score = tf.reduce_max(cls_pred, axis=-1)
         cls_best_class = tf.argmax(cls_pred, axis=-1)
@@ -112,6 +116,19 @@ class MyLoss(tf.losses.Loss):
         smooth_l1_loss = tf.reduce_mean(smooth_l1_loss)
         return smooth_l1_loss
 
+class SaveBoundingImage(Trace):
+    def __init__(self, batch_idx=[0]):
+        self.batch_idx = batch_idx
+
+    def on_batch_end(self, mode, logs):
+        if mode == "eval" and logs["step"] in self.batch_idx:
+            cls_selected, loc_selected, valid_outputs = logs["prediction"] #cls_selected is [A], loc_selected is [A, 4], valida_outputs is [B]
+            image = np.array(logs["batch"]["image"])
+            cls_selected, loc_selected, valid_outputs = np.array(cls_selected), np.array(loc_selected), np.array(valid_outputs)
+            np.savez("epoch%d" % logs["epoch"], cls_selected=cls_selected, loc_selected=loc_selected, valid_outputs=valid_outputs, image=image)
+            print("saving predicted results to epoch%d" % logs["epoch"])
+
+
 def get_estimator():
     # train_csv, test_csv, path = svhn_data.load_data()
 
@@ -125,5 +142,6 @@ def get_estimator():
     
     estimator = Estimator(network= Network(),
                           pipeline=pipeline,
-                          epochs= 10)
+                          epochs= 10,
+                          traces=[SaveBoundingImage()])
     return estimator
