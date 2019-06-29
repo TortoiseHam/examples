@@ -13,7 +13,7 @@ import cv2
 class Network:
     def __init__(self):
         self.model = RetinaNet(input_shape=(64, 64, 3), num_classes=10)
-        self.optimizer = tf.optimizers.Adam()
+        self.optimizer = tf.optimizers.Adam(learning_rate=0.0001)
         self.loss = MyLoss()
         self.anchorbox = tf.convert_to_tensor(get_fpn_anchor_box(input_shape=(64, 64, 3)))
         self.anchor_w_h = tf.tile(self.anchorbox[:,2:], [1, 2]) - tf.tile(self.anchorbox[:, :2], [1, 2])
@@ -28,7 +28,7 @@ class Network:
 
     def eval_op(self, batch):
         top_n = 1000
-        score_threshold = 0.05
+        score_threshold = 0.5
         predictions = self.model(batch["image"], training=False)
         loss = self.loss((batch["target_cls"], batch["target_loc"]), predictions)
         cls_pred, loc_pred = tuple(predictions)
