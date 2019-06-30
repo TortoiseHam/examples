@@ -12,10 +12,10 @@ import cv2
 
 class Network:
     def __init__(self):
-        self.model = RetinaNet(input_shape=(64, 64, 3), num_classes=10)
+        self.model = RetinaNet(input_shape=(64, 128, 3), num_classes=10)
         self.optimizer = tf.optimizers.Adam(learning_rate=0.0001)
         self.loss = MyLoss()
-        self.anchorbox = tf.convert_to_tensor(get_fpn_anchor_box(input_shape=(64, 64, 3)))
+        self.anchorbox = tf.convert_to_tensor(get_fpn_anchor_box(input_shape=(64, 128, 3)))
         self.anchor_w_h = tf.tile(self.anchorbox[:,2:], [1, 2]) - tf.tile(self.anchorbox[:, :2], [1, 2])
 
     def train_op(self, batch):
@@ -27,8 +27,8 @@ class Network:
         return predictions, loss
 
     def eval_op(self, batch):
-        top_n = 1000
-        score_threshold = 0.5
+        top_n = 10
+        score_threshold = 0.2
         predictions = self.model(batch["image"], training=False)
         loss = self.loss((batch["target_cls"], batch["target_loc"]), predictions)
         cls_pred, loc_pred = tuple(predictions)
@@ -61,7 +61,7 @@ class MyPipeline(Pipeline):
     def edit_feature(self, feature):
         height, width = feature["image"].shape[0], feature["image"].shape[1]
         feature["x1"], feature["y1"], feature["x2"], feature["y2"] = feature["x1"]/width, feature["y1"]/height, feature["x2"]/width, feature["y2"]/height
-        feature["image"] = cv2.resize(feature["image"], (64, 64))
+        feature["image"] = cv2.resize(feature["image"], (128, 64)) #cv2 requires (width, height)
         anchorbox = get_fpn_anchor_box(input_shape=feature["image"].shape)
         target_cls, target_loc = get_target(anchorbox, feature["label"], feature["x1"], feature["y1"], feature["x2"], feature["y2"], num_classes=10)
         feature["target_cls"], feature["target_loc"] = target_cls, target_loc
@@ -79,7 +79,7 @@ class MyLoss(tf.losses.Loss):
         cls_pred, loc_pred = tuple(y_pred)
         focal_loss, obj_idx = self.focal_loss(cls_gt, cls_pred, num_classes=10)
         smooth_l1_loss = self.smooth_l1(loc_gt, loc_pred, obj_idx)
-        return focal_loss+smooth_l1_loss
+        return 40000*focal_loss+smooth_l1_loss
 
     def focal_loss(self, cls_gt, cls_pred, num_classes, alpha=0.25, gamma=2.0):
         #cls_gt has shape [B, A], cls_pred is in [B, A, K]
@@ -116,32 +116,20 @@ class MyLoss(tf.losses.Loss):
         smooth_l1_loss = tf.reduce_mean(smooth_l1_loss)
         return smooth_l1_loss
 
-class SaveBoundingImage(Trace):
-    def __init__(self, batch_idx=[0]):
-        self.batch_idx = batch_idx
-
-    def on_batch_end(self, mode, logs):
-        if mode == "eval" and logs["step"] in self.batch_idx:
-            cls_selected, loc_selected, valid_outputs = logs["prediction"] #cls_selected is [A], loc_selected is [A, 4], valida_outputs is [B]
-            image = np.array(logs["batch"]["image"])
-            cls_selected, loc_selected, valid_outputs = np.array(cls_selected), np.array(loc_selected), np.array(valid_outputs)
-            np.savez("epoch%d" % logs["epoch"], cls_selected=cls_selected, loc_selected=loc_selected, valid_outputs=valid_outputs, image=image)
-            print("saving predicted results to epoch%d" % logs["epoch"])
-
-
 def get_estimator():
-    # train_csv, test_csv, path = svhn_data.load_data()
+    train_csv, test_csv, path = svhn_data.load_data()
 
     pipeline = MyPipeline(batch_size=256,
                           feature_name=["image", "label", "x1", "y1", "x2", "y2", "target_cls", "target_loc"],
-                        #   train_data=train_csv,
-                        #   validation_data=test_csv,
-                        #   transform_dataset=[[ImageReader(parent_path=path)], [String2List()], [String2List()], [String2List()], [String2List()], [String2List()], [],[]],
+                          train_data=train_csv,
+                          validation_data=test_csv,
+                          transform_dataset=[[ImageReader(parent_path=path)], [String2List()], [String2List()], [String2List()], [String2List()], [String2List()], [],[]],
                           transform_train= [[Minmax()], [], [], [],[],[],[],[]],
                           padded_batch=True)
     
     estimator = Estimator(network= Network(),
                           pipeline=pipeline,
-                          epochs= 10,
+                          epochs= 15,
+                          log_steps=20,
                           traces=[SaveBoundingImage()])
     return estimator
