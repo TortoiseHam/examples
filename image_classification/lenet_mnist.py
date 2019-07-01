@@ -37,7 +37,7 @@ def get_estimator(epochs=2, batch_size=32, optimizer="adam"):
                         validation_data={"x": x_eval, "y": y_eval},
                         transform_train= [[Minmax()], []])
 
-    traces = [Accuracy(feature_true="y")]
+    traces = [Accuracy(y_true_key="y")]
 
     estimator = Estimator(network= Network(),
                           pipeline=pipeline,
