@@ -1,10 +1,12 @@
-from fastestimator.pipeline.static.preprocess import Minmax
-from fastestimator.estimator.estimator import Estimator
-from fastestimator.pipeline.pipeline import Pipeline
-from fastestimator.architecture.lenet import LeNet
-from fastestimator.estimator.trace import Accuracy
-import tensorflow as tf
 import numpy as np
+import tensorflow as tf
+
+from fastestimator.architecture.lenet import LeNet
+from fastestimator.estimator.estimator import Estimator
+from fastestimator.estimator.trace import Accuracy, ConfusionMatrix
+from fastestimator.pipeline.pipeline import Pipeline
+from fastestimator.pipeline.static.preprocess import Minmax
+
 
 class Network:
     def __init__(self):
@@ -35,12 +37,12 @@ def get_estimator(epochs=2, batch_size=32, optimizer="adam"):
                         feature_name=["x", "y"],
                         train_data={"x": x_train, "y": y_train},
                         validation_data={"x": x_eval, "y": y_eval},
-                        transform_train= [[Minmax()], []])
+                        transform_train=[[Minmax()], []])
 
-    traces = [Accuracy(feature_true="y")]
+    traces = [Accuracy(y_true_key="y"), ConfusionMatrix(y_true_key="y", num_classes=10)]
 
-    estimator = Estimator(network= Network(),
+    estimator = Estimator(network=Network(),
                           pipeline=pipeline,
-                          epochs= epochs,
-                          traces= traces)
+                          epochs=epochs,
+                          traces=traces)
     return estimator
