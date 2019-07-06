@@ -130,6 +130,5 @@ def get_estimator():
     estimator = Estimator(network= Network(),
                           pipeline=pipeline,
                           epochs= 15,
-                          log_steps=20,
-                          traces=[SaveBoundingImage()])
+                          log_steps=20)
     return estimator
